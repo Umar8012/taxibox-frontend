@@ -28,6 +28,7 @@ export default function BookingForm() {
     type: 'success' | 'error' | null;
     message: string;
   }>({ type: null, message: '' });
+  const [slotBookings, setSlotBookings] = useState<{ [key: string]: number }>({}); 
 
   const vehicleTypes = [
     { value: 'taxi', label: 'Taxi (max 4 persons)' },
@@ -95,20 +96,34 @@ export default function BookingForm() {
       return;
     }
 
+    // Check if the selected time slot has reached the booking limit
+    if (isScheduled && selectedDateTime) {
+      const timeSlotKey = selectedDateTime.toISOString();
+      const currentBookings = slotBookings[timeSlotKey] || 0;
+      
+      if (currentBookings >= 3) {
+        setSubmitStatus({
+          type: 'error',
+          message: 'Dieses Zeitfenster ist ausgebucht. Bitte wählen Sie einen anderen Termin.'
+        });
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setSubmitStatus({ type: null, message: '' });
 
-    const bookingDetails = {
-      type: isScheduled ? 'Scheduled Ride' : 'Immediate Ride',
-      pickupLocation: formData.pickupLocation,
-      destination: formData.destination,
-      dateTime: isScheduled ? formatDateTime(selectedDateTime) : 'As soon as possible',
-      phone: formData.phone,
-      email: formData.email,
-      vehicleType: formData.vehicleType
-    };
-
     try {
+      const bookingDetails = {
+        type: isScheduled ? 'Scheduled Ride' : 'Immediate Ride',
+        pickupLocation: formData.pickupLocation,
+        destination: formData.destination,
+        dateTime: isScheduled ? formatDateTime(selectedDateTime) : 'As soon as possible',
+        phone: formData.phone,
+        email: formData.email,
+        vehicleType: formData.vehicleType
+      };
+
       const response = await fetch('http://localhost:3001/api/book-ride', {
         method: 'POST',
         headers: {
@@ -120,9 +135,22 @@ export default function BookingForm() {
       const data = await response.json();
       
       if (response.ok) {
+        // Update the booking count for the time slot
+        if (isScheduled && selectedDateTime) {
+          const timeSlotKey = selectedDateTime.toISOString();
+          const newBookingCount = (slotBookings[timeSlotKey] || 0) + 1;
+          setSlotBookings(prev => ({
+            ...prev,
+            [timeSlotKey]: newBookingCount
+          }));
+
+          // Log current bookings for this slot
+          console.log(`Slot ${formatDateTime(selectedDateTime)} has ${newBookingCount} bookings`);
+        }
+
         setSubmitStatus({
           type: 'success',
-          message: data.message
+          message: `${data.message} ${isScheduled ? `(Slot has ${(slotBookings[selectedDateTime!.toISOString()] || 0) + 1} bookings)` : ''}`
         });
 
         // Reset form
@@ -137,6 +165,7 @@ export default function BookingForm() {
       } else {
         throw new Error(data.message);
       }
+      
     } catch (error) {
       setSubmitStatus({
         type: 'error',
@@ -146,6 +175,19 @@ export default function BookingForm() {
     }
 
     setIsSubmitting(false);
+  };
+
+  // Add function to get minimum time for today
+  const getMinTime = () => {
+    const now = new Date();
+    const selected = selectedDateTime || new Date();
+    
+    // If selected date is today, return current time
+    if (selected.toDateString() === now.toDateString()) {
+      return now;
+    }
+    // For future dates, return start of day
+    return new Date(selected.setHours(0, 0, 0, 0));
   };
 
   return (
@@ -304,6 +346,8 @@ export default function BookingForm() {
                 timeIntervals={15}
                 dateFormat="MMMM d, yyyy h:mm aa"
                 minDate={new Date()}
+                minTime={getMinTime()}
+                maxTime={new Date(new Date().setHours(23, 59, 0, 0))}
                 className={`w-full bg-zinc-800 rounded-lg py-2 px-4 focus:ring-2 focus:ring-yellow-500 outline-none ${
                   showErrors && errors.dateTime ? 'border-2 border-red-500' : ''
                 }`}
